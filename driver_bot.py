@@ -829,7 +829,7 @@ async def start_bot():
     await site.start()
     
     print(f"🌐 Веб-сервер запущен на порту {port}")
-    print(f"🚀 Бот запущен! Админ ID: {ADMIN_ID}")ы
+    print(f"🚀 Бот запущен! Админ ID: {ADMIN_ID}")
     print(f"👥 Водителей в базе: {len(DRIVERS)}")
     
     await dp.start_polling(bot)
