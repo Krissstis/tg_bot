@@ -17,10 +17,10 @@ logging.basicConfig(level=logging.INFO)
 # Токен бота
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8687705334:AAFLQxeDPtf8FUa35mts2icQNBJUdPJ5kEY")
 
-# ID администратора (ваш Telegram ID)
+# ID администратора
 ADMIN_ID = 993913729
 
-# Словари для водителей (будут заполнены из базы)
+# Словари для водителей
 DRIVERS = {}
 DRIVER_NAMES = {}
 
@@ -32,7 +32,6 @@ dp = Dispatcher(storage=storage)
 # ==================== БАЗА ДАННЫХ ====================
 
 def init_db():
-    """Создаем таблицы в базе данных"""
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     
@@ -78,7 +77,6 @@ def init_db():
     conn.close()
 
 def load_drivers():
-    """Загружает список водителей из базы в память"""
     global DRIVERS, DRIVER_NAMES
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
@@ -91,10 +89,8 @@ def load_drivers():
     for driver_id, full_name in drivers:
         DRIVERS[full_name] = driver_id
         DRIVER_NAMES[driver_id] = full_name
-    logging.info(f"Загружено водителей: {len(DRIVERS)}")
 
 def add_driver_to_db(driver_id, full_name, phone="", car_info="", added_by=0):
-    """Добавляет водителя в базу"""
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -111,18 +107,15 @@ def add_driver_to_db(driver_id, full_name, phone="", car_info="", added_by=0):
         conn.close()
 
 def update_driver_in_db(driver_id, full_name=None, phone=None, car_info=None):
-    """Обновляет данные водителя"""
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     
-    # Получаем текущие данные
     c.execute("SELECT full_name, phone, car_info FROM drivers WHERE driver_id = ?", (driver_id,))
     current = c.fetchone()
     if not current:
         conn.close()
         return False, "Водитель не найден"
     
-    # Обновляем только переданные поля
     new_full_name = full_name if full_name is not None else current[0]
     new_phone = phone if phone is not None else current[1]
     new_car_info = car_info if car_info is not None else current[2]
@@ -138,7 +131,6 @@ def update_driver_in_db(driver_id, full_name=None, phone=None, car_info=None):
     return True, new_full_name
 
 def delete_driver_from_db(driver_id):
-    """Удаляет водителя из базы"""
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     
@@ -163,7 +155,6 @@ def delete_driver_from_db(driver_id):
     return deleted, driver_name
 
 def get_all_drivers():
-    """Получает список всех водителей из базы"""
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     c.execute("SELECT driver_id, full_name, phone, car_info, added_date FROM drivers ORDER BY full_name")
@@ -172,7 +163,6 @@ def get_all_drivers():
     return drivers
 
 def get_driver_by_id(driver_id):
-    """Получает данные одного водителя по ID"""
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     c.execute("SELECT driver_id, full_name, phone, car_info, added_date FROM drivers WHERE driver_id = ?", (driver_id,))
@@ -180,7 +170,21 @@ def get_driver_by_id(driver_id):
     conn.close()
     return driver
 
-# Инициализируем базу и загружаем водителей
+def get_all_active_bookings():
+    conn = sqlite3.connect('drivers.db')
+    c = conn.cursor()
+    c.execute("""
+        SELECT b.id, d.full_name, b.client_full_name, b.booking_date, b.booking_time, b.status
+        FROM bookings b
+        LEFT JOIN drivers d ON b.driver_id = d.driver_id
+        WHERE b.status = 'active'
+        ORDER BY b.booking_datetime
+    """)
+    bookings = c.fetchall()
+    conn.close()
+    return bookings
+
+# Инициализация
 init_db()
 load_drivers()
 
@@ -193,21 +197,17 @@ class ClientBooking(StatesGroup):
     choosing_time = State()
 
 class AdminStates(StatesGroup):
-    # Для добавления
     waiting_for_driver_id = State()
     waiting_for_driver_name = State()
     waiting_for_driver_phone = State()
     waiting_for_driver_car = State()
-    
-    # Для редактирования
     waiting_for_edit_driver_id = State()
     waiting_for_edit_field = State()
     waiting_for_edit_value = State()
 
-# ==================== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАТАМИ ====================
+# ==================== ФУНКЦИИ ДЛЯ ДАТ ====================
 
 def get_next_workdays(count=5):
-    """Возвращает список следующих рабочих дней (пн-пт)"""
     workdays = []
     current_date = datetime.now().date()
     
@@ -219,7 +219,6 @@ def get_next_workdays(count=5):
     return workdays
 
 def get_time_slots():
-    """Возвращает список временных слотов 09:00-17:30"""
     slots = []
     start_time = datetime.strptime("09:00", "%H:%M")
     end_time = datetime.strptime("17:30", "%H:%M")
@@ -234,7 +233,6 @@ def get_time_slots():
     return slots
 
 def is_slot_available(driver_id, date, time_slot):
-    """Проверяет, свободен ли слот"""
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     c.execute("SELECT id FROM booked_slots WHERE driver_id = ? AND slot_date = ? AND slot_time = ?",
@@ -258,8 +256,7 @@ def get_main_keyboard():
 def get_driver_keyboard():
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📋 Мои записи")],
-            [KeyboardButton(text="🔙 В главное меню")]
+            [KeyboardButton(text="📋 Мои записи")]
         ],
         resize_keyboard=True
     )
@@ -270,8 +267,7 @@ def get_admin_keyboard():
         keyboard=[
             [KeyboardButton(text="📋 Все записи")],
             [KeyboardButton(text="➕ Записать клиента"), KeyboardButton(text="❌ Отменить запись")],
-            [KeyboardButton(text="🚗 Управление водителями")],
-            [KeyboardButton(text="🔙 В главное меню")]
+            [KeyboardButton(text="🚗 Управление водителями")]
         ],
         resize_keyboard=True
     )
@@ -446,7 +442,6 @@ async def process_time_choice(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=get_main_keyboard()
     )
     
-    # Уведомление водителю
     try:
         name_parts = client[0].split()
         short_name = f"{name_parts[0]} {name_parts[1][0]}.{name_parts[2][0]}." if len(name_parts) >= 3 else client[0]
@@ -461,31 +456,21 @@ async def process_time_choice(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()
 
+# ==================== ПРОСМОТР ЗАПИСЕЙ ====================
+
 @dp.message(lambda message: message.text == "📋 Мои записи")
 async def show_my_bookings(message: types.Message):
     user_id = message.from_user.id
     conn = sqlite3.connect('drivers.db')
     c = conn.cursor()
     
-    if user_id == ADMIN_ID:
-        c.execute("""SELECT b.id, d.full_name, b.client_full_name, b.booking_date, b.booking_time 
-                     FROM bookings b LEFT JOIN drivers d ON b.driver_id = d.driver_id
-                     WHERE b.status = 'active' ORDER BY b.booking_datetime""")
-        bookings = c.fetchall()
-        conn.close()
-        
-        if not bookings:
-            await message.answer("Нет активных записей.")
-            return
-        
-        text = "📋 <b>Все записи:</b>\n\n"
-        for b in bookings:
-            text += f"#{b[0]} {b[1]} — {b[2]}\n{b[3]} {b[4]}\n\n"
-        
-    elif user_id in DRIVER_NAMES:
-        c.execute("""SELECT b.id, b.client_full_name, b.booking_date, b.booking_time 
-                     FROM bookings b WHERE b.driver_id = ? AND b.status = 'active'
-                     ORDER BY b.booking_datetime""", (user_id,))
+    if user_id in DRIVER_NAMES:
+        c.execute("""
+            SELECT b.id, b.client_full_name, b.booking_date, b.booking_time, b.status
+            FROM bookings b
+            WHERE b.driver_id = ? AND b.status = 'active'
+            ORDER BY b.booking_datetime
+        """, (user_id,))
         bookings = c.fetchall()
         conn.close()
         
@@ -498,10 +483,13 @@ async def show_my_bookings(message: types.Message):
             text += f"👤 {b[1]}\n📅 {b[2]} {b[3]}\n\n"
         
     else:
-        c.execute("""SELECT d.full_name, b.booking_date, b.booking_time 
-                     FROM bookings b LEFT JOIN drivers d ON b.driver_id = d.driver_id
-                     WHERE b.client_id = ? AND b.status = 'active'
-                     ORDER BY b.booking_datetime""", (user_id,))
+        c.execute("""
+            SELECT d.full_name, b.booking_date, b.booking_time
+            FROM bookings b
+            LEFT JOIN drivers d ON b.driver_id = d.driver_id
+            WHERE b.client_id = ? AND b.status = 'active'
+            ORDER BY b.booking_datetime
+        """, (user_id,))
         bookings = c.fetchall()
         conn.close()
         
@@ -512,6 +500,20 @@ async def show_my_bookings(message: types.Message):
         text = "📋 <b>Ваши записи:</b>\n\n"
         for b in bookings:
             text += f"🚗 {b[0]}\n📅 {b[1]} {b[2]}\n\n"
+    
+    await message.answer(text, parse_mode="HTML")
+
+@dp.message(lambda message: message.text == "📋 Все записи" and message.from_user.id == ADMIN_ID)
+async def show_all_bookings(message: types.Message):
+    bookings = get_all_active_bookings()
+    
+    if not bookings:
+        await message.answer("Нет активных записей.")
+        return
+    
+    text = "📋 <b>Все активные записи:</b>\n\n"
+    for b in bookings:
+        text += f"#{b[0]} | {b[1]} | {b[2]}\n📅 {b[3]} {b[4]}\n\n"
     
     await message.answer(text, parse_mode="HTML")
 
@@ -647,7 +649,6 @@ async def admin_edit_driver_choose(callback: types.CallbackQuery, state: FSMCont
     
     await state.update_data(edit_driver_id=driver_id)
     
-    # Показываем текущие данные
     text = (
         f"🚗 <b>Редактирование водителя</b>\n\n"
         f"🆔 ID: {driver[0]}\n"
@@ -701,7 +702,6 @@ async def admin_edit_driver_value(message: types.Message, state: FSMContext):
     if new_value == '-':
         new_value = ""
     
-    # Обновляем в зависимости от поля
     if field == "name":
         success, name = update_driver_in_db(driver_id, full_name=new_value)
     elif field == "phone":
@@ -718,7 +718,6 @@ async def admin_edit_driver_value(message: types.Message, state: FSMContext):
             reply_markup=get_admin_keyboard()
         )
         
-        # Уведомляем водителя об изменении
         try:
             await bot.send_message(
                 driver_id,
@@ -796,23 +795,11 @@ async def admin_delete_cancel(callback: types.CallbackQuery):
     await callback.message.edit_text("❌ Удаление отменено.")
     await callback.answer()
 
-# ==================== ВСПОМОГАТЕЛЬНЫЕ ОБРАБОТЧИКИ ====================
-
 @dp.message(lambda message: message.text == "🔙 Назад" and message.from_user.id == ADMIN_ID)
-async def admin_back_to_main(message: types.Message):
-    await message.answer("Главное меню:", reply_markup=get_admin_keyboard())
+async def admin_back_to_driver_management(message: types.Message):
+    await message.answer("Управление водителями:", reply_markup=get_driver_management_keyboard())
 
-@dp.message(lambda message: message.text == "🔙 В главное меню")
-async def back_to_main(message: types.Message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        await message.answer("Главное меню:", reply_markup=get_admin_keyboard())
-    elif user_id in DRIVER_NAMES:
-        await message.answer("Главное меню:", reply_markup=get_driver_keyboard())
-    else:
-        await message.answer("Главное меню:", reply_markup=get_main_keyboard())
-
-# ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
+# ==================== ВЕБ-СЕРВЕР ====================
 
 async def health_check(request):
     return web.Response(text="I'm alive!")
