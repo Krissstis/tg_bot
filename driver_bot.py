@@ -103,7 +103,7 @@ def add_driver_to_db(driver_id, full_name, phone="", car_info="", added_by=0):
                      VALUES (?, ?, ?, ?, ?, ?)""",
                   (driver_id, full_name, phone, car_info, added_by, now))
         conn.commit()
-        load_drivers()
+        load_drivers()  # Обновляем словари
         return True, full_name
     except sqlite3.IntegrityError:
         return False, None
@@ -518,6 +518,7 @@ async def admin_add_driver_name(message: types.Message, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_driver_phone)
 async def admin_add_driver_phone(message: types.Message, state: FSMContext):
+    """Получить телефон водителя"""
     phone = message.text.strip()
     if phone == '-':
         phone = ""
@@ -527,11 +528,14 @@ async def admin_add_driver_phone(message: types.Message, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_driver_car)
 async def admin_add_driver_car(message: types.Message, state: FSMContext):
+    """Получить информацию о машине и сохранить"""
     car_info = message.text.strip()
     if car_info == '-':
         car_info = ""
     
     data = await state.get_data()
+    
+    # Добавляем водителя в базу
     success, name = add_driver_to_db(
         driver_id=data['driver_id'],
         full_name=data['full_name'],
@@ -542,19 +546,29 @@ async def admin_add_driver_car(message: types.Message, state: FSMContext):
     
     if success:
         await message.answer(
-            f"✅ Водитель {name} успешно добавлен!",
+            f"✅ Водитель {name} успешно добавлен!\n\n"
+            f"ID: {data['driver_id']}\n"
+            f"Телефон: {data['phone'] or 'не указан'}\n"
+            f"Машина: {car_info or 'не указана'}",
             reply_markup=get_admin_keyboard()
         )
+        
+        # Пробуем отправить приветствие новому водителю
         try:
             await bot.send_message(
                 data['driver_id'],
-                f"🚖 Вас добавили как водителя!\nВаше имя: {data['full_name']}\nНапишите /start для начала работы."
+                f"🚖 Вас добавили как водителя в систему!\n\n"
+                f"Ваше имя: {data['full_name']}\n"
+                f"Телефон: {data['phone'] or 'не указан'}\n"
+                f"Машина: {car_info or 'не указана'}\n\n"
+                f"Напишите /start для начала работы."
             )
-        except:
-            pass
+        except Exception as e:
+            logging.error(f"Не удалось отправить уведомление водителю: {e}")
+            # Не показываем ошибку пользователю
     else:
         await message.answer(
-            "❌ Водитель с таким ID уже существует.",
+            f"❌ Водитель с ID {data['driver_id']} уже существует в системе.",
             reply_markup=get_admin_keyboard()
         )
     
