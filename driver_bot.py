@@ -15,7 +15,7 @@ from aiohttp import web
 logging.basicConfig(level=logging.INFO)
 
 # Токен бота
-BOT_TOKEN = "8687705334:AAFO3Nzp7UOHMinjA5o40kCvhsoQOGXmfaI"
+BOT_TOKEN = "8687705334:AAFLQxeDPtf8FUa35mts2icQNBJUdPJ5kEY"
 
 # ID администратора (ваш Telegram ID)
 ADMIN_ID = 993913729  
