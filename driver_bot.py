@@ -103,12 +103,39 @@ def add_driver_to_db(driver_id, full_name, phone="", car_info="", added_by=0):
                      VALUES (?, ?, ?, ?, ?, ?)""",
                   (driver_id, full_name, phone, car_info, added_by, now))
         conn.commit()
-        load_drivers()  # Обновляем словари
+        load_drivers()
         return True, full_name
     except sqlite3.IntegrityError:
         return False, None
     finally:
         conn.close()
+
+def update_driver_in_db(driver_id, full_name=None, phone=None, car_info=None):
+    """Обновляет данные водителя"""
+    conn = sqlite3.connect('drivers.db')
+    c = conn.cursor()
+    
+    # Получаем текущие данные
+    c.execute("SELECT full_name, phone, car_info FROM drivers WHERE driver_id = ?", (driver_id,))
+    current = c.fetchone()
+    if not current:
+        conn.close()
+        return False, "Водитель не найден"
+    
+    # Обновляем только переданные поля
+    new_full_name = full_name if full_name is not None else current[0]
+    new_phone = phone if phone is not None else current[1]
+    new_car_info = car_info if car_info is not None else current[2]
+    
+    c.execute("""UPDATE drivers 
+                 SET full_name = ?, phone = ?, car_info = ?
+                 WHERE driver_id = ?""",
+              (new_full_name, new_phone, new_car_info, driver_id))
+    
+    conn.commit()
+    conn.close()
+    load_drivers()
+    return True, new_full_name
 
 def delete_driver_from_db(driver_id):
     """Удаляет водителя из базы"""
@@ -144,6 +171,15 @@ def get_all_drivers():
     conn.close()
     return drivers
 
+def get_driver_by_id(driver_id):
+    """Получает данные одного водителя по ID"""
+    conn = sqlite3.connect('drivers.db')
+    c = conn.cursor()
+    c.execute("SELECT driver_id, full_name, phone, car_info, added_date FROM drivers WHERE driver_id = ?", (driver_id,))
+    driver = c.fetchone()
+    conn.close()
+    return driver
+
 # Инициализируем базу и загружаем водителей
 init_db()
 load_drivers()
@@ -157,10 +193,16 @@ class ClientBooking(StatesGroup):
     choosing_time = State()
 
 class AdminStates(StatesGroup):
+    # Для добавления
     waiting_for_driver_id = State()
     waiting_for_driver_name = State()
     waiting_for_driver_phone = State()
     waiting_for_driver_car = State()
+    
+    # Для редактирования
+    waiting_for_edit_driver_id = State()
+    waiting_for_edit_field = State()
+    waiting_for_edit_value = State()
 
 # ==================== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАТАМИ ====================
 
@@ -240,6 +282,7 @@ def get_driver_management_keyboard():
         keyboard=[
             [KeyboardButton(text="📋 Список водителей")],
             [KeyboardButton(text="➕ Добавить водителя")],
+            [KeyboardButton(text="✏️ Редактировать водителя")],
             [KeyboardButton(text="❌ Удалить водителя")],
             [KeyboardButton(text="🔙 Назад")]
         ],
@@ -492,6 +535,8 @@ async def admin_list_drivers(message: types.Message):
     
     await message.answer(text, parse_mode="HTML")
 
+# ==================== ДОБАВЛЕНИЕ ВОДИТЕЛЯ ====================
+
 @dp.message(lambda message: message.text == "➕ Добавить водителя" and message.from_user.id == ADMIN_ID)
 async def admin_add_driver_start(message: types.Message, state: FSMContext):
     await message.answer(
@@ -518,7 +563,6 @@ async def admin_add_driver_name(message: types.Message, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_driver_phone)
 async def admin_add_driver_phone(message: types.Message, state: FSMContext):
-    """Получить телефон водителя"""
     phone = message.text.strip()
     if phone == '-':
         phone = ""
@@ -528,14 +572,12 @@ async def admin_add_driver_phone(message: types.Message, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_driver_car)
 async def admin_add_driver_car(message: types.Message, state: FSMContext):
-    """Получить информацию о машине и сохранить"""
     car_info = message.text.strip()
     if car_info == '-':
         car_info = ""
     
     data = await state.get_data()
     
-    # Добавляем водителя в базу
     success, name = add_driver_to_db(
         driver_id=data['driver_id'],
         full_name=data['full_name'],
@@ -553,7 +595,6 @@ async def admin_add_driver_car(message: types.Message, state: FSMContext):
             reply_markup=get_admin_keyboard()
         )
         
-        # Пробуем отправить приветствие новому водителю
         try:
             await bot.send_message(
                 data['driver_id'],
@@ -563,9 +604,8 @@ async def admin_add_driver_car(message: types.Message, state: FSMContext):
                 f"Машина: {car_info or 'не указана'}\n\n"
                 f"Напишите /start для начала работы."
             )
-        except Exception as e:
-            logging.error(f"Не удалось отправить уведомление водителю: {e}")
-            # Не показываем ошибку пользователю
+        except:
+            pass
     else:
         await message.answer(
             f"❌ Водитель с ID {data['driver_id']} уже существует в системе.",
@@ -573,6 +613,128 @@ async def admin_add_driver_car(message: types.Message, state: FSMContext):
         )
     
     await state.clear()
+
+# ==================== РЕДАКТИРОВАНИЕ ВОДИТЕЛЯ ====================
+
+@dp.message(lambda message: message.text == "✏️ Редактировать водителя" and message.from_user.id == ADMIN_ID)
+async def admin_edit_driver_start(message: types.Message, state: FSMContext):
+    drivers = get_all_drivers()
+    
+    if not drivers:
+        await message.answer("В системе нет водителей.")
+        return
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    for d in drivers:
+        keyboard.inline_keyboard.append([InlineKeyboardButton(
+            text=f"{d[1]} (ID: {d[0]})",
+            callback_data=f"editdriver_{d[0]}"
+        )])
+    
+    await message.answer("Выберите водителя для редактирования:", reply_markup=keyboard)
+    await state.set_state(AdminStates.waiting_for_edit_driver_id)
+
+@dp.callback_query(AdminStates.waiting_for_edit_driver_id)
+async def admin_edit_driver_choose(callback: types.CallbackQuery, state: FSMContext):
+    driver_id = int(callback.data.replace("editdriver_", ""))
+    driver = get_driver_by_id(driver_id)
+    
+    if not driver:
+        await callback.message.answer("❌ Водитель не найден.")
+        await state.clear()
+        await callback.answer()
+        return
+    
+    await state.update_data(edit_driver_id=driver_id)
+    
+    # Показываем текущие данные
+    text = (
+        f"🚗 <b>Редактирование водителя</b>\n\n"
+        f"🆔 ID: {driver[0]}\n"
+        f"👤 Имя: {driver[1]}\n"
+        f"📞 Телефон: {driver[2] or 'не указан'}\n"
+        f"🚘 Машина: {driver[3] or 'не указана'}\n\n"
+        f"Что хотите изменить?"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Изменить имя", callback_data="edit_field_name")],
+        [InlineKeyboardButton(text="📞 Изменить телефон", callback_data="edit_field_phone")],
+        [InlineKeyboardButton(text="🚘 Изменить машину", callback_data="edit_field_car")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="edit_cancel")]
+    ])
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await state.set_state(AdminStates.waiting_for_edit_field)
+    await callback.answer()
+
+@dp.callback_query(AdminStates.waiting_for_edit_field)
+async def admin_edit_driver_field(callback: types.CallbackQuery, state: FSMContext):
+    field = callback.data.replace("edit_field_", "")
+    
+    if field == "cancel":
+        await callback.message.edit_text("❌ Редактирование отменено.")
+        await state.clear()
+        await callback.answer()
+        return
+    
+    field_names = {
+        "name": "имя",
+        "phone": "телефон",
+        "car": "информацию о машине"
+    }
+    
+    await state.update_data(edit_field=field)
+    await callback.message.edit_text(
+        f"Введите новое {field_names.get(field, 'значение')} для водителя:"
+    )
+    await state.set_state(AdminStates.waiting_for_edit_value)
+    await callback.answer()
+
+@dp.message(AdminStates.waiting_for_edit_value)
+async def admin_edit_driver_value(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    driver_id = data['edit_driver_id']
+    field = data['edit_field']
+    new_value = message.text.strip()
+    
+    if new_value == '-':
+        new_value = ""
+    
+    # Обновляем в зависимости от поля
+    if field == "name":
+        success, name = update_driver_in_db(driver_id, full_name=new_value)
+    elif field == "phone":
+        success, name = update_driver_in_db(driver_id, phone=new_value)
+    elif field == "car":
+        success, name = update_driver_in_db(driver_id, car_info=new_value)
+    else:
+        success = False
+    
+    if success:
+        field_names = {"name": "Имя", "phone": "Телефон", "car": "Машина"}
+        await message.answer(
+            f"✅ {field_names.get(field, 'Поле')} успешно обновлено!",
+            reply_markup=get_admin_keyboard()
+        )
+        
+        # Уведомляем водителя об изменении
+        try:
+            await bot.send_message(
+                driver_id,
+                f"ℹ️ Ваши данные были обновлены администратором."
+            )
+        except:
+            pass
+    else:
+        await message.answer(
+            "❌ Ошибка при обновлении данных.",
+            reply_markup=get_admin_keyboard()
+        )
+    
+    await state.clear()
+
+# ==================== УДАЛЕНИЕ ВОДИТЕЛЯ ====================
 
 @dp.message(lambda message: message.text == "❌ Удалить водителя" and message.from_user.id == ADMIN_ID)
 async def admin_delete_driver_start(message: types.Message):
@@ -634,6 +796,8 @@ async def admin_delete_cancel(callback: types.CallbackQuery):
     await callback.message.edit_text("❌ Удаление отменено.")
     await callback.answer()
 
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ОБРАБОТЧИКИ ====================
+
 @dp.message(lambda message: message.text == "🔙 Назад" and message.from_user.id == ADMIN_ID)
 async def admin_back_to_main(message: types.Message):
     await message.answer("Главное меню:", reply_markup=get_admin_keyboard())
@@ -665,7 +829,7 @@ async def start_bot():
     await site.start()
     
     print(f"🌐 Веб-сервер запущен на порту {port}")
-    print(f"🚀 Бот запущен! Админ ID: {ADMIN_ID}")
+    print(f"🚀 Бот запущен! Админ ID: {ADMIN_ID}")ы
     print(f"👥 Водителей в базе: {len(DRIVERS)}")
     
     await dp.start_polling(bot)
