@@ -15,7 +15,7 @@ from aiohttp import web
 logging.basicConfig(level=logging.INFO)
 
 # Токен бота
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8687705334:AAHvAHubpaADUg5WwR2evmqvuZKEY0SJos0")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8687705334:AAFMaKMoMRlyxbCGZQeaXCsCRl7GjNGJ73s")
 
 # ID администратора
 ADMIN_ID = 993913729
